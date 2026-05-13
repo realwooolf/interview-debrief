@@ -39,19 +39,59 @@ sudo apt install ffmpeg
 
 ## 飞书配置
 
-**使用前需要填写自己的飞书应用凭证：**
+使用前需要创建自己的飞书应用，完成后将凭证填入 skill。
+
+### 第一步：创建飞书自建应用
+
+1. 打开 [open.feishu.cn](https://open.feishu.cn)，登录你的飞书账号
+2. 点击右上角「开发者后台」→「创建应用」→ 选「自建应用」
+3. 填写应用名称（随意，如 `interview-debrief`）和描述，创建完成
+
+### 第二步：开启权限
+
+1. 进入应用后，左侧菜单点「权限管理」
+2. 搜索并开启以下两个权限：
+   - `docx:document`（以应用身份读写文档内容）
+   - `bitable:app`（以应用身份读取多维表格）
+3. 点击「申请权限」，选择「无需审核，直接开启」
+
+### 第三步：添加回调地址
+
+1. 左侧菜单点「安全设置」
+2. 找到「重定向 URL」，点击添加，填入：
+   ```
+   http://localhost:9998/callback
+   ```
+3. 保存
+
+### 第四步：发布应用
+
+1. 左侧菜单点「应用发布」→「版本管理与发布」
+2. 创建一个版本，点击「申请线上发布」
+3. 如果是个人自用，选择「仅对内测用户可见」即可，不需要审核
+
+### 第五步：获取凭证并填入 skill
+
+1. 左侧菜单点「凭证与基础信息」，复制 **App ID** 和 **App Secret**
+2. 在 SKILL.md 中找到以下两处，替换成你自己的值：
+
+   **飞书配置章节：**
+   ```
+   APP_ID = "your_app_id"      ← 替换这里
+   APP_SECRET = "your_app_secret"  ← 替换这里
+   ```
+
+   **「获取飞书 user_access_token」代码块（`# 从 skill 配置中读取` 注释下方）：**
+   ```python
+   APP_ID = "your_app_id"      ← 替换这里
+   APP_SECRET = "your_app_secret"  ← 替换这里
+   ```
+
+配置完成后，第一次使用时会自动打开浏览器完成飞书 OAuth 授权，之后 token 自动缓存，无需重复操作。
 
 ```
-APP_ID = "your_app_id"
-APP_SECRET = "your_app_secret"
 TOKEN_CACHE = os.path.expanduser("~/.claude/feishu_token.json")
 ```
-
-**如何获取 APP_ID / APP_SECRET：**
-1. 前往飞书开放平台 open.feishu.cn，创建一个「自建应用」
-2. 在「权限管理」中开启：`docx:document`（云文档读写）、`bitable:app`（多维表格）
-3. 在「安全设置」→「重定向 URL」中添加：`http://localhost:9998/callback`
-4. 将应用的 App ID 和 App Secret 填入两处：上方「飞书配置」章节，以及下方「获取飞书 user_access_token」代码块中的 `APP_ID` / `APP_SECRET` 变量
 
 ---
 
