@@ -163,6 +163,8 @@ def transcribe(files):
 - 公司名
 - 岗位名
 - 面试轮次（如：一面、二面、终面）
+- 面试官姓名（选填，不知道可跳过）
+- 面试时长（选填，如 45min）
 
 若类型为**导师指导**，追加询问：
 - 指导人姓名
@@ -427,6 +429,139 @@ def divider():
 
 三个文档创建完毕后，将面试总评内容直接输出在对话框中，方便即时查看。
 
-### 6. 完成提示
+### 6. 更新多维表格
 
-告知用户三个飞书文档已创建，并输出每个文档的链接（格式：`https://bytedance.feishu.cn/docx/{document_id}`）。
+三个文档创建完成后，自动更新 `~/.claude/feishu_config.json` 中配置的面试记录多维表格。
+
+**逻辑：**
+1. 每次**永远新建**一条记录，不查找、不覆盖已有记录
+2. 写入以下字段：公司（见命名规则）、岗位、面试整理版（链接）、面试问答整理（链接）、面试总评（链接）
+3. 如果用户提供了面试官姓名和时长，也一并写入
+
+**公司字段命名规则：**
+- 新建前先查询表格，看是否已有同名公司的记录
+- 如果**没有**已有记录：`公司` 字段直接写公司名（如「酷开」）
+- 如果**已有 1 条**记录且该记录的公司字段等于纯公司名（说明之前只有一面）：
+  - 先把那条老记录的 `公司` 字段更新为「公司名+一面」（如「酷开一面」）
+  - 新记录的 `公司` 字段写「公司名+当前轮次」（如「酷开二面」、「酷开HR面」）
+- 如果**已有 2 条及以上**记录：新记录直接写「公司名+当前轮次」，不动已有记录
+
+轮次后缀直接用收集到的面试轮次字段（如「一面」「二面」「HR面」「终面」）。
+
+```python
+import json, subprocess, os, tempfile
+
+APP_ID = "your_app_id"
+APP_SECRET = "your_app_secret"
+
+def curl_put_bitable(url, data, token):
+    payload = json.dumps(data, ensure_ascii=False)
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
+        f.write(payload)
+        fname = f.name
+    try:
+        result = subprocess.run(
+            ["curl", "-sk", "-X", "PUT", url, "--noproxy", "*",
+             "-H", "Content-Type: application/json",
+             "-H", f"Authorization: Bearer {token}",
+             "--data", f"@{fname}"],
+            capture_output=True, text=True, timeout=30)
+    finally:
+        os.unlink(fname)
+    if not result.stdout.strip():
+        return {}
+    decoder = json.JSONDecoder()
+    obj, _ = decoder.raw_decode(result.stdout.strip())
+    return obj
+
+def curl_post_bitable(url, data, token):
+    payload = json.dumps(data, ensure_ascii=False)
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
+        f.write(payload)
+        fname = f.name
+    try:
+        result = subprocess.run(
+            ["curl", "-sk", "-X", "POST", url, "--noproxy", "*",
+             "-H", "Content-Type: application/json",
+             "-H", f"Authorization: Bearer {token}",
+             "--data", f"@{fname}"],
+            capture_output=True, text=True, timeout=30)
+    finally:
+        os.unlink(fname)
+    if not result.stdout.strip():
+        return {}
+    decoder = json.JSONDecoder()
+    obj, _ = decoder.raw_decode(result.stdout.strip())
+    return obj
+
+def update_bitable(token, company, round_name, date_str, position, interviewer, duration,
+                   doc1_id, doc2_id, doc3_id):
+    cfg = json.load(open(os.path.expanduser("~/.claude/feishu_config.json")))
+    app_token = cfg.get("interview_bitable_app_token")
+    table_id = cfg.get("interview_bitable_table_id")
+    if not app_token or not table_id:
+        print("bitable 未配置，跳过")
+        return
+
+    base_url = f"https://open.feishu.cn/open-apis/bitable/v1/apps/{app_token}/tables/{table_id}"
+
+    # 查询该公司已有的所有记录
+    records_r = subprocess.run(
+        ["curl", "-sk", f"{base_url}/records?page_size=100", "--noproxy", "*",
+         "-H", f"Authorization: Bearer {token}"],
+        capture_output=True, text=True, timeout=30)
+    records_data = json.loads(records_r.stdout)
+    existing = [
+        rec for rec in records_data.get("data", {}).get("items", [])
+        if rec["fields"].get("公司", "").startswith(company)
+    ]
+
+    if len(existing) == 0:
+        company_label = company
+    else:
+        company_label = f"{company}{round_name}"
+        if len(existing) == 1 and existing[0]["fields"].get("公司", "") == company:
+            old_id = existing[0]["record_id"]
+            curl_put_bitable(
+                f"{base_url}/records/{old_id}",
+                {"fields": {"公司": f"{company}一面"}},
+                token)
+
+    fields = {
+        "公司": company_label,
+        "岗位": position,
+        "面试时间": date_str,
+        "面试整理版": {
+            "text": f"{company_label}-面试整理版",
+            "link": f"https://bytedance.feishu.cn/docx/{doc1_id}"
+        },
+        "面试问答整理": {
+            "text": f"{company_label}-面试问答整理",
+            "link": f"https://bytedance.feishu.cn/docx/{doc2_id}"
+        },
+        "面试总评": {
+            "text": f"{company_label}-面试总评",
+            "link": f"https://bytedance.feishu.cn/docx/{doc3_id}"
+        }
+    }
+    if interviewer:
+        fields["面试官"] = interviewer
+    if duration:
+        fields["时长"] = duration
+
+    r = curl_post_bitable(f"{base_url}/records", {"fields": fields}, token)
+    print("bitable 新建：", "成功" if r.get("code") == 0 else r)
+```
+
+调用时传入收集好的信息：
+```python
+update_bitable(token, company=公司名, round_name=面试轮次,
+               date_str=面试日期, position=岗位名,
+               interviewer=面试官(可为None), duration=时长(可为None),
+               doc1_id=doc1_id, doc2_id=doc2_id, doc3_id=doc3_id)
+```
+
+### 7. 完成提示
+
+告知用户三个飞书文档已创建，多维表格已更新，并输出每个文档的链接（格式：`https://bytedance.feishu.cn/docx/{document_id}`）。
+
