@@ -13,7 +13,7 @@ npx skills add realwooolf/interview-debrief
 把录音文件路径发给 Claude，说「帮我整理这场面试」：
 
 ```
-帮我整理这场面试 /Users/xxx/Desktop/酷开二面.mp3
+帮我整理这场面试 /Users/xxx/Desktop/面试录音.mp3
 ```
 
 或者直接上传已有的 PDF 转录文本，skill 会自动识别并跳过转录阶段。
