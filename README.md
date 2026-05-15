@@ -47,9 +47,12 @@ brew install ffmpeg      # macOS
 
 ## 功能 / Features
 
-- **自动转录 / Auto transcription**：本地运行 Whisper，支持 .wav / .m4a / .mp3 / .mp4
+- **自动转录 / Auto transcription**：本地运行 Whisper，支持 .wav / .m4a / .mp3 / .mp4，不上传任何数据
+- **发言人识别 / Speaker detection**：根据对话内容自动区分面试官和候选人，完整对话中分别标注
 - **多文件合并 / Multi-file merge**：多段录音自动按时间排序合并
-- **三份输出 / Three outputs**：完整对话、问答整理、面试总评
+- **三份输出 / Three outputs**：完整对话、问答整理、面试总评，总评同步输出到对话框
+- **多维表格归档 / Bitable archive**：每场面试自动写入飞书多维表格，记录公司、岗位、轮次和三个文档链接，首次使用自动建表
+- **多轮命名 / Multi-round naming**：同公司多次面试自动追加轮次后缀，如「天气」→「天气一面」「天气二面」，历史记录不乱
 - **双路径保存 / Two save options**：本地 .md 文件，或飞书文档 + 多维表格
 
 ---
