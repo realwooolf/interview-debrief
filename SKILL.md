@@ -1,13 +1,16 @@
 ---
 name: interview-debrief
-description: 面试复盘助手，处理面试录音或转录文本。触发场景：用户提到"面试复盘"、上传音频文件（.wav/.m4a/.mp3/.mp4）需要压缩或转录、上传 PDF 转录文件需要整理、或说"帮我整理这场面试"。
+description: 面试复盘助手，处理面试录音或转录文本。触发场景：用户提到"面试复盘"、上传音频文件（.wav/.m4a/.mp3/.mp4）需要转录、上传 PDF 转录文件需要整理、或说"帮我整理这场面试"。
 ---
 
 # 面试复盘
 
 根据传入的文件类型自动判断执行阶段：
 - 传入音频文件（.wav / .m4a / .mp3）或视频文件（.mp4）→ 执行阶段一：本地转录
-- 传入 PDF 文件 → 执行阶段二：整理并生成飞书文档
+- 传入 PDF 文件（已有转录文本）→ 执行阶段二：整理并输出结果
+
+> **注意：** Claude Code 不支持直接上传音频/视频文件。请粘贴文件路径，或截图文件所在位置（如 Finder 窗口底部会显示完整路径），例如：
+> `帮我整理这场面试 /Users/xxx/Desktop/酷开二面.mp3`
 
 **多文件处理：** 如果用户传入多个音频/视频文件，在阶段一完成后自动执行阶段零（多文件合并排序），再进入阶段二。单文件则跳过合并直接处理。
 
@@ -39,7 +42,7 @@ sudo apt install ffmpeg
 
 ## 飞书配置
 
-使用前需要创建自己的飞书应用，完成后将凭证填入 skill。
+若选择保存到飞书，需要先完成以下一次性配置。选本地保存可跳过此章节。
 
 ### 第一步：创建飞书自建应用
 
@@ -50,10 +53,24 @@ sudo apt install ffmpeg
 ### 第二步：开启权限
 
 1. 进入应用后，左侧菜单点「权限管理」
-2. 搜索并开启以下两个权限：
-   - `docx:document`（以应用身份读写文档内容）
-   - `bitable:app`（以应用身份读取多维表格）
-3. 点击「申请权限」，选择「无需审核，直接开启」
+2. 点击「**批量导入/导出权限**」→「导入」，将以下 JSON 粘贴进去，点「下一步，确认新增权限」：
+   ```json
+   {
+     "scopes": {
+       "user": [
+         "docx:document",
+         "bitable:app",
+         "docs:doc",
+         "docs:doc:readonly",
+         "docs:document:import",
+         "drive:drive",
+         "drive:file",
+         "wiki:wiki"
+       ]
+     }
+   }
+   ```
+3. 确认后权限全部生效（测试企业环境下免审核）
 
 ### 第三步：添加回调地址
 
@@ -66,32 +83,33 @@ sudo apt install ffmpeg
 
 ### 第四步：发布应用
 
-1. 左侧菜单点「应用发布」→「版本管理与发布」
-2. 创建一个版本，点击「申请线上发布」
-3. 如果是个人自用，选择「仅对内测用户可见」即可，不需要审核
+1. 左侧菜单点「版本管理与发布」→「创建版本」
+2. 版本号填 `1.0.0`，更新说明随意填
+3. 可用范围保持默认（部分成员，仅自己可见）
+4. 点「保存」，飞书个人版免审核，保存后立即生效
 
-### 第五步：获取凭证并填入 skill
+### 第五步：获取凭证并创建配置文件
 
 1. 左侧菜单点「凭证与基础信息」，复制 **App ID** 和 **App Secret**
-2. 在 SKILL.md 中找到以下两处，替换成你自己的值：
 
-   **飞书配置章节：**
-   ```
-   APP_ID = "your_app_id"      ← 替换这里
-   APP_SECRET = "your_app_secret"  ← 替换这里
+2. 在终端运行以下命令创建配置文件（替换为你的实际值）：
+
+   ```bash
+   cat > ~/.claude/feishu_config.json << 'EOF'
+   {
+     "app_id": "你的 App ID",
+     "app_secret": "你的 App Secret",
+     "interview_bitable_app_token": "",
+     "interview_bitable_table_id": ""
+   }
+   EOF
    ```
 
-   **「获取飞书 user_access_token」代码块（`# 从 skill 配置中读取` 注释下方）：**
-   ```python
-   APP_ID = "your_app_id"      ← 替换这里
-   APP_SECRET = "your_app_secret"  ← 替换这里
-   ```
+3. 多维表格配置（二选一）：
+   - **没有表格**：两个字段留空，第一次运行时 skill 会自动创建并写入
+   - **已有表格**：打开飞书多维表格，URL 格式为 `https://xxx.feishu.cn/base/ClG9xxxxxxx?table=tblxxxxxxx`，`ClG9xxxxxxx` 填入 `interview_bitable_app_token`，`tblxxxxxxx` 填入 `interview_bitable_table_id`
 
 配置完成后，第一次使用时会自动打开浏览器完成飞书 OAuth 授权，之后 token 自动缓存，无需重复操作。
-
-```
-TOKEN_CACHE = os.path.expanduser("~/.claude/feishu_token.json")
-```
 
 ---
 
@@ -130,7 +148,7 @@ def transcribe(files):
 
 注意：
 - mlx-whisper 首次运行会自动下载模型（约 800MB），之后缓存本地
-- **转录命令启动后，立即在对话框中询问阶段二所需的信息**（复盘类型、日期、公司名等），无需等转录完成。转录结束后直接用已收集的信息进入阶段零（多文件）或阶段二（单文件）。
+- **转录命令启动后，立即在对话框中询问阶段二所需的信息**（保存方式、日期、公司名等），无需等转录完成。转录结束后直接用已收集的信息进入阶段零（多文件）或阶段二（单文件）。
 
 ---
 
@@ -151,28 +169,23 @@ def transcribe(files):
 
 ---
 
-## 阶段二：面试整理 → 生成飞书文档
+## 阶段二：面试整理 → 输出结果
 
 **触发条件：** 文件扩展名为 .pdf，或阶段一/阶段零完成后的转录文本
 
-启动前先收集以下信息（如果用户没有提供，主动询问）：
-- **复盘类型**（面试 / 导师指导 / 其他）→ 决定后续文档模板和信息头
-- **日期**（格式：YYYY-MM-DD）
+启动前分两步收集信息：
 
-若类型为**面试**，追加询问：
-- 公司名
-- 岗位名
-- 面试轮次（如：一面、二面、终面）
-- 面试官姓名（选填，不知道可跳过）
-- 面试时长（选填，如 45min）
+**第一问（单独问）：**
+- 保存方式：本地文件 还是 飞书文档？
 
-若类型为**导师指导**，追加询问：
-- 指导人姓名
-- 主题（如：作品集、求职方向、项目复盘）
+收到回答后，若选飞书且未检测到 `~/.claude/feishu_config.json`，先引导完成飞书配置（见「飞书配置」章节），配置完成后再继续。
 
-若类型为**其他**，追加询问：
-- 对方身份
-- 主题
+**第二问（合并成一条消息）：**
+- 日期（格式：YYYY-MM-DD）
+- 公司名、岗位名、面试轮次（如一面、二面、终面）
+- 面试官姓名（选填）、面试时长（选填，如 45min）
+
+默认按面试类型处理。若用户说明是「其他」类型（如聊天、咨询等），则改为询问对方身份和主题，且跳过多维表格更新。
 
 根据类型生成对应的文档标题和信息头：
 
@@ -185,15 +198,6 @@ def transcribe(files):
 信息头：公司 / 岗位 / 轮次 / 日期
 ```
 
-**导师指导：**
-```
-{指导人} 完整对话
-{指导人} 问答整理
-{指导人} 指导总评
-
-信息头：指导人 / 性质：{主题} / 日期
-```
-
 **其他：**
 ```
 {对方身份} 完整对话
@@ -203,7 +207,28 @@ def transcribe(files):
 信息头：对方身份 / 主题 / 日期
 ```
 
-### 1. 获取飞书 user_access_token
+### 1. 本地保存（选本地时执行）
+
+将整理结果写入录音文件同目录下的 .md 文件：
+
+```python
+import os
+
+def save_local(source_path, title, full_dialogue, qa, summary):
+    # source_path 可以是音频文件或 PDF 文件路径
+    base_dir = os.path.dirname(os.path.abspath(source_path))
+    for suffix, content in [("完整对话", full_dialogue), ("问答整理", qa), ("总评", summary)]:
+        out = os.path.join(base_dir, f"{title}-{suffix}.md")
+        with open(out, "w", encoding="utf-8") as f:
+            f.write(content)
+        print(f"已保存：{out}")
+```
+
+保存完成后，将总评内容直接输出在对话框中。后续飞书相关步骤全部跳过。
+
+---
+
+### 2. 获取飞书 user_access_token（选飞书时执行）
 
 从配置中读取 APP_ID / APP_SECRET，TOKEN_CACHE 路径做 `~` 展开：
 
@@ -211,9 +236,10 @@ def transcribe(files):
 import json, time, os, subprocess, tempfile
 import http.server, threading, webbrowser, urllib.parse
 
-# 从 skill 配置中读取，用户需自行填写
-APP_ID = "your_app_id"
-APP_SECRET = "your_app_secret"
+# 从本地配置文件读取（~/.claude/feishu_config.json），不写入 skill 避免泄露
+_cfg = json.load(open(os.path.expanduser("~/.claude/feishu_config.json")))
+APP_ID = _cfg["app_id"]
+APP_SECRET = _cfg["app_secret"]
 TOKEN_CACHE = os.path.expanduser("~/.claude/feishu_token.json")
 REDIRECT_URI = "http://localhost:9998/callback"
 
@@ -244,6 +270,8 @@ def curl_post_auth(url, data, headers=None):
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     finally:
         os.unlink(fname)
+    if not result.stdout.strip():
+        return {}
     return json.loads(result.stdout)
 
 def get_app_token():
@@ -269,7 +297,9 @@ def oauth_flow():
     t.start()
     auth_url = (f"https://open.feishu.cn/open-apis/authen/v1/authorize"
                 f"?app_id={APP_ID}&redirect_uri={urllib.parse.quote(REDIRECT_URI)}"
-                f"&scope=docx%3Adocument%20bitable%3Aapp&response_type=code")
+                f"&scope=docx%3Adocument%20bitable%3Aapp%20docs%3Adoc%20docs%3Adoc%3Areadonly"
+                f"%20docs%3Adocument%3Aimport%20drive%3Adrive%20drive%3Afile%20wiki%3Awiki"
+                f"&response_type=code")
     print("正在打开飞书授权页面...")
     webbrowser.open(auth_url)
     t.join(timeout=120)
@@ -281,6 +311,8 @@ def oauth_flow():
         {"grant_type": "authorization_code", "code": code},
         headers=[f"Authorization: Bearer {app_token}"])
     d = d.get("data", {})
+    if not d.get("access_token"):
+        raise Exception(f"获取 access_token 失败，请检查飞书应用配置：{d}")
     token_data = {
         "access_token": d["access_token"],
         "refresh_token": d.get("refresh_token", ""),
@@ -298,17 +330,17 @@ def get_token():
 
 首次运行会打开浏览器授权，之后 token 自动缓存复用，无需重复操作。
 
-### 2. 读取 PDF
+### 3. 读取 PDF
 
 用 Read 工具读取 PDF 全文。
 
-### 3. 识别发言人
+### 4. 识别发言人
 
 根据对话内容判断：
 - 做自我介绍、介绍项目、回答问题的是**我**
 - 提问、追问、给反馈的是**面试官**
 
-### 4. 生成三个飞书文档
+### 5. 生成三个飞书文档
 
 **重要注意事项（调试确认）：**
 - 用 subprocess curl 调用飞书 API，绕过 Python SSL 栈（Python 3.14 + 本地代理会导致 SSL handshake 失败）
@@ -425,10 +457,11 @@ def divider():
 
 如有特殊情况（面试官明确反馈、压力性问题、明显失误等），单独增加板块说明。
 
-### 5. 面试总评同时在对话框内输出
+### 6. 面试总评同时在对话框内输出
 
 三个文档创建完毕后，将面试总评内容直接输出在对话框中，方便即时查看。
 
+<<<<<<< HEAD
 ### 6. 更新多维表格
 
 三个文档创建完成后，自动更新 `~/.claude/feishu_config.json` 中配置的面试记录多维表格。
@@ -565,3 +598,197 @@ update_bitable(token, company=公司名, round_name=面试轮次,
 
 告知用户三个飞书文档已创建，多维表格已更新，并输出每个文档的链接（格式：`https://bytedance.feishu.cn/docx/{document_id}`）。
 
+=======
+### 7. 更新多维表格（仅面试类型）
+
+三个文档创建完成后，自动更新 `~/.claude/feishu_config.json` 中配置的面试记录多维表格。
+
+**首先检查并自动创建多维表格（若未配置）：**
+
+```python
+def create_bitable_if_needed(token):
+    cfg_path = os.path.expanduser("~/.claude/feishu_config.json")
+    cfg = json.load(open(cfg_path))
+    if cfg.get("interview_bitable_app_token") and cfg.get("interview_bitable_table_id"):
+        return  # 已配置，跳过
+
+    print("未检测到多维表格，正在自动创建面试记录表...")
+
+    # 创建多维表格应用
+    r = curl_post("https://open.feishu.cn/open-apis/bitable/v1/apps",
+                  {"name": "面试记录"}, token)
+    if r.get("code") != 0:
+        print(f"创建多维表格失败: {r}")
+        return
+    app_token = r["data"]["app"]["app_token"]
+
+    # 获取默认表格 ID
+    r2 = subprocess.run(
+        ["curl", "-sk", f"https://open.feishu.cn/open-apis/bitable/v1/apps/{app_token}/tables",
+         "--noproxy", "*", "-H", f"Authorization: Bearer {token}"],
+        capture_output=True, text=True, timeout=30)
+    table_id = json.loads(r2.stdout)["data"]["items"][0]["table_id"]
+
+    # 新建所有业务字段（默认表只有「标题」字段，公司岗位等需要全部手动创建）
+    fields_url = f"https://open.feishu.cn/open-apis/bitable/v1/apps/{app_token}/tables/{table_id}/fields"
+    for field in [
+        {"field_name": "公司",     "type": 1},
+        {"field_name": "岗位",     "type": 1},
+        {"field_name": "面试轮次", "type": 1},
+        {"field_name": "面试时间", "type": 5},
+        {"field_name": "面试时长", "type": 1},
+        {"field_name": "面试官",   "type": 1},
+        {"field_name": "面试整理版",   "type": 15},
+        {"field_name": "面试问答整理", "type": 15},
+        {"field_name": "面试总评",     "type": 15},
+    ]:
+        curl_post(fields_url, field, token)
+
+    # 写回配置文件
+    cfg["interview_bitable_app_token"] = app_token
+    cfg["interview_bitable_table_id"] = table_id
+    with open(cfg_path, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+    print(f"✅ 多维表格已创建：https://feishu.cn/base/{app_token}")
+```
+
+**仅面试类型执行此步骤，其他类型直接跳到第 8 步。**
+
+执行顺序：先调用 `create_bitable_if_needed(token)` 确保表格存在，再调用 `update_bitable` 写入记录。
+
+**逻辑：**
+1. 每次**永远新建**一条记录，不查找、不覆盖已有记录
+2. 写入以下字段：公司（见命名规则）、岗位、面试轮次、面试时间、面试时长、面试官、三个文档链接
+3. 面试官和面试时长为选填，用户未提供则跳过
+
+**公司字段命名规则：**
+- 新建前先查询表格，看是否已有同名公司的记录
+- 如果**没有**已有记录：`公司` 字段直接写公司名（如「酷开」）
+- 如果**已有 1 条**记录且该记录的公司字段等于纯公司名（说明之前只有一面）：
+  - 先把那条老记录的 `公司` 字段更新为「公司名+一面」（如「酷开一面」）
+  - 新记录的 `公司` 字段写「公司名+当前轮次」（如「酷开二面」、「酷开HR面」）
+- 如果**已有 2 条及以上**记录：新记录直接写「公司名+当前轮次」，不动已有记录
+
+轮次后缀直接用收集到的面试轮次字段（如「一面」「二面」「HR面」「终面」）。
+
+```python
+import json, subprocess, os, tempfile
+
+def curl_put_bitable(url, data, token):
+    payload = json.dumps(data, ensure_ascii=False)
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
+        f.write(payload)
+        fname = f.name
+    try:
+        result = subprocess.run(
+            ["curl", "-sk", "-X", "PUT", url, "--noproxy", "*",
+             "-H", "Content-Type: application/json",
+             "-H", f"Authorization: Bearer {token}",
+             "--data", f"@{fname}"],
+            capture_output=True, text=True, timeout=30)
+    finally:
+        os.unlink(fname)
+    if not result.stdout.strip():
+        return {}
+    decoder = json.JSONDecoder()
+    obj, _ = decoder.raw_decode(result.stdout.strip())
+    return obj
+
+def curl_post_bitable(url, data, token):
+    payload = json.dumps(data, ensure_ascii=False)
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
+        f.write(payload)
+        fname = f.name
+    try:
+        result = subprocess.run(
+            ["curl", "-sk", "-X", "POST", url, "--noproxy", "*",
+             "-H", "Content-Type: application/json",
+             "-H", f"Authorization: Bearer {token}",
+             "--data", f"@{fname}"],
+            capture_output=True, text=True, timeout=30)
+    finally:
+        os.unlink(fname)
+    if not result.stdout.strip():
+        return {}
+    decoder = json.JSONDecoder()
+    obj, _ = decoder.raw_decode(result.stdout.strip())
+    return obj
+
+def update_bitable(token, company, round_name, date_str, position, interviewer, duration,
+                   doc1_id, doc2_id, doc3_id):
+    cfg = json.load(open(os.path.expanduser("~/.claude/feishu_config.json")))
+    app_token = cfg.get("interview_bitable_app_token")
+    table_id = cfg.get("interview_bitable_table_id")
+    if not app_token or not table_id:
+        print("bitable 未配置，跳过")
+        return
+
+    base_url = f"https://open.feishu.cn/open-apis/bitable/v1/apps/{app_token}/tables/{table_id}"
+
+    # 查询该公司已有的所有记录
+    records_r = subprocess.run(
+        ["curl", "-sk", f"{base_url}/records?page_size=100", "--noproxy", "*",
+         "-H", f"Authorization: Bearer {token}"],
+        capture_output=True, text=True, timeout=30)
+    records_data = json.loads(records_r.stdout)
+    existing = [
+        rec for rec in records_data.get("data", {}).get("items", [])
+        if rec["fields"].get("公司", "").startswith(company)
+    ]
+
+    # 决定新记录的公司字段名
+    if len(existing) == 0:
+        # 第一条记录，直接写公司名
+        company_label = company
+    else:
+        # 已有记录，新记录加轮次后缀
+        company_label = f"{company}{round_name}"
+        # 如果只有 1 条老记录且它的公司字段等于纯公司名，补上「一面」后缀
+        if len(existing) == 1 and existing[0]["fields"].get("公司", "") == company:
+            old_id = existing[0]["record_id"]
+            curl_put_bitable(
+                f"{base_url}/records/{old_id}",
+                {"fields": {"公司": f"{company}一面"}},
+                token)
+            print(f"已将旧记录公司名更新为「{company}一面」")
+
+    fields = {
+        "公司": company_label,
+        "岗位": position,
+        "面试轮次": round_name,
+        "面试时间": date_str,
+        "面试整理版": {
+            "text": f"{company_label}-面试整理版",
+            "link": f"https://feishu.cn/docx/{doc1_id}"
+        },
+        "面试问答整理": {
+            "text": f"{company_label}-面试问答整理",
+            "link": f"https://feishu.cn/docx/{doc2_id}"
+        },
+        "面试总评": {
+            "text": f"{company_label}-面试总评",
+            "link": f"https://feishu.cn/docx/{doc3_id}"
+        }
+    }
+    if interviewer:
+        fields["面试官"] = interviewer
+    if duration:
+        fields["面试时长"] = duration
+
+    r = curl_post_bitable(f"{base_url}/records", {"fields": fields}, token)
+    print("bitable 新建：", "成功" if r.get("code") == 0 else r)
+```
+
+调用时传入收集好的信息：
+```python
+update_bitable(token, company=公司名, round_name=面试轮次,
+               date_str=面试日期, position=岗位名,
+               interviewer=面试官(可为None), duration=时长(可为None),
+               doc1_id=doc1_id, doc2_id=doc2_id, doc3_id=doc3_id)
+```
+
+### 8. 完成提示
+
+告知用户三个飞书文档已创建，多维表格已更新，并输出每个文档的链接（格式：`https://feishu.cn/docx/{document_id}`）。
+>>>>>>> fe73e09 (fix: 完善新用户配置流程、修复OAuth scope、统一保存方式、删除导师指导类型)
