@@ -1,6 +1,6 @@
 ---
-name: interview-debrief
-description: 面试复盘助手，处理面试录音或转录文本。触发场景：用户提到"面试复盘"、上传音频文件（.wav/.m4a/.mp3/.mp4）需要转录、上传 PDF 转录文件需要整理、或说"帮我整理这场面试"。
+name: voice-debrief
+description: 面试录音转译复盘助手，处理面试录音或转录文本。触发场景：用户提到"面试复盘"、上传音频文件（.wav/.m4a/.mp3/.mp4）需要转录、上传 PDF 转录文件需要整理、或说"帮我整理这场面试"。
 ---
 
 # 面试复盘
@@ -142,7 +142,8 @@ def transcribe(files):
             model = whisper.load_model("small")
             fp16 = torch.cuda.is_available()
             result = model.transcribe(f, language="zh", fp16=fp16)
-        open(out, 'w', encoding='utf-8').write('\n'.join(s['text'].strip() for s in result['segments']))
+        open(out, 'w', encoding='utf-8').write('
+'.join(s['text'].strip() for s in result['segments']))
         print('完成:', out)
 ```
 
